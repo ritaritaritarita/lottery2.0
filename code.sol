@@ -1,13 +1,13 @@
-/**
-   _           _   _                    ___    ___  
- | |         | | | |                  |__ \  / _ \ 
- | |     ___ | |_| |_ ___ _ __ _   _     ) || | | |
- | |    / _ \| __| __/ _ \ '__| | | |   / / | | | |
- | |___| (_) | |_| ||  __/ |  | |_| |  / /_ | |_| |
- |______\___/ \__|\__\___|_|   \__, | |____(_)___/ 
-                                __/ |              
-                               |___/               
-*/
+//
+//  _           _   _                    ___    ___  
+// | |         | | | |                  |__ \  / _ \ 
+// | |     ___ | |_| |_ ___ _ __ _   _     ) || | | |
+// | |    / _ \| __| __/ _ \ '__| | | |   / / | | | |
+// | |___| (_) | |_| ||  __/ |  | |_| |  / /_ | |_| |
+// |______\___/ \__|\__\___|_|   \__, | |____(_)___/ 
+//                                __/ |              
+//                               |___/               
+//
 pragma solidity ^0.7.5;
 
 
@@ -293,10 +293,13 @@ contract LotteryTwo is Ownable{
     //pepemonFactory address
     address public pepemonFactory;
     
-    //how long users have to wait before minting in blocks
+    //how long users have to wait before they can withdraw LP
     //5760 blocks = 1 day
     //40320 blocks = 1 week
     uint public blockTime;
+    
+    //Block when users will be allowed to mint NFTs if they provided liq before this block
+    uint public stakingDeadline;
     
     //how many PPDEX needed to stake for a normal NFT
     uint public minPPDEX = 466*10**17;
@@ -323,16 +326,17 @@ contract LotteryTwo is Ownable{
      *  _normalID => ID for normal NFT
      *  _goldenID => ID for golden NFT
      */
-    constructor(address _UniV2Address, uint _blockTime, address _PPDEX, address _pepemonFactory, uint _normalID, uint _goldenID)  {
+    constructor(address _UniV2Address, uint _blockTime, address _PPDEX, address _pepemonFactory, uint _normalID, uint _goldenID, uint _stakingDeadline)  {
         UniV2Address = _UniV2Address;
         blockTime = _blockTime;
         PPDEX = _PPDEX;
         pepemonFactory = _pepemonFactory;
         normalID = _normalID;
         goldenID = _goldenID;
+        stakingDeadline = _stakingDeadline;
     }
     //mapping that keeps track of last nft claim
-    mapping (address => uint) lastClaim;
+    mapping (address => uint) depositBlock;
     
     //mapping that keeps track of how many LP tokens user deposited
     mapping (address => uint ) LPBalance;
@@ -342,6 +346,9 @@ contract LotteryTwo is Ownable{
     
     //mapping that keeps track of if a user is staking normal nft
     mapping (address => bool) isStakingNormalNFT;
+    
+    //Keeps track of if a user has minted a NFT;
+    mapping(address => mapping(uint => bool)) hasMinted;
     
     //setter functions
     
@@ -357,7 +364,7 @@ contract LotteryTwo is Ownable{
     function setPepemonFactory (address _pepemonFactory) public onlyOwner{
         pepemonFactory = _pepemonFactory;
     }
-    //Sets how many blocks a user must wait in order to mint a NFT
+    //Sets how many blocks a user must wait in order to withdraw
     function setBlockTime (uint _blockTime) public onlyOwner{
         blockTime = _blockTime;
     }
@@ -369,14 +376,13 @@ contract LotteryTwo is Ownable{
     function setminPPDEX (uint _minPPDEX) public onlyOwner{
         minPPDEX = _minPPDEX;
     }
-    //Sets the ID for minting normal NFTs.
-    function setNormalID (uint _normalID) public onlyOwner{
+    //Updates NFT info - IDs + block 
+    function updateNFT (uint _normalID, uint _goldenID, uint _stakingDeadline) public onlyOwner{
         normalID = _normalID;
-    }
-    //Sets the ID for minting golden NFTs.
-    function setGoldenID (uint _goldenID) public onlyOwner{
         goldenID = _goldenID;
+        stakingDeadline = _stakingDeadline;
     }
+    //Sets 
     
     //view LP functions
     
@@ -413,9 +419,9 @@ contract LotteryTwo is Ownable{
     
     //mapping functions
     
-    //Get the block num of the last time the address claimed 
-    function getLastClaim(address addr) public view returns(uint){
-        return lastClaim[addr];
+    //Get the block num of the time the user staked
+    function getStakingStart(address addr) public view returns(uint){
+        return depositBlock[addr];
     }
     
     //Get the amount of LP tokens the address deposited
@@ -426,6 +432,11 @@ contract LotteryTwo is Ownable{
     //Check if an address is staking.
     function isUserStaking(address addr) public view returns (bool){
         return isStaking[addr];
+    }
+    
+    //Check if user has minted a NFT
+    function hasUserMinted(address addr, uint id) public view returns(bool){
+        return hasMinted[addr][id];
     }
     
     //Check if an addres is staking for a normal or golden NFT
@@ -448,7 +459,7 @@ contract LotteryTwo is Ownable{
         
         //Update mappings
         LPBalance[msg.sender] = lpamount;
-        lastClaim[msg.sender] = block.number;
+        depositBlock[msg.sender] = block.number;
         isStaking[msg.sender] = true;
         isStakingNormalNFT[msg.sender]= true;
         emit Staked(msg.sender, lpamount);
@@ -465,18 +476,23 @@ contract LotteryTwo is Ownable{
         
         //Update mappings
         LPBalance[msg.sender] = lpamount;
-        lastClaim[msg.sender] = block.number;
+        depositBlock[msg.sender] = block.number;
         isStaking[msg.sender] = true;
         isStakingNormalNFT[msg.sender]= false;
         emit Staked(msg.sender, lpamount);
     }
     //Allow the user to withdraw
     function withdrawLP() public{
+        
         IUniswapV2ERC20 lptoken = IUniswapV2ERC20(UniV2Address);
+        
+        //LP tokens are locked for 7 days
+        require (depositBlock[msg.sender]+blockTime < block.number, "Must wait 7 days to withdraw");
+        
         //Update mappings
         uint lpamount = LPBalance[msg.sender];
         LPBalance[msg.sender] = 0;
-        lastClaim[msg.sender] = 0;
+        depositBlock[msg.sender] = 0;
         isStaking[msg.sender] = false;
         isStakingNormalNFT[msg.sender]= false;
         //Send user his LP token balance
@@ -486,24 +502,30 @@ contract LotteryTwo is Ownable{
     
     //Allow the user to mint a NFT
     function mintNFT() public {
+        
         //Make sure user is staking
         require (isStaking[msg.sender], "User isn't staking");
         
         //Make sure enough time has passed
-        require (block.number.sub(lastClaim[msg.sender])>blockTime , "Please wait longer");
+        require (block.number > stakingDeadline, "Please wait longer");
         
-        //Update lastClaim mapping
-        lastClaim[msg.sender] = block.number;
+        //Make sure enough time has passed
+        require (depositBlock[msg.sender] < stakingDeadline, "You did not stake before the deadline");
+        
+        //Make sure user did not already mint a nft
+        require ((hasMinted[msg.sender][normalID]  == false)&& (hasMinted[msg.sender][goldenID])== false, "You have already minted a NFT");
         
         IPepemonFactory factory = IPepemonFactory(pepemonFactory);
         
         //Send user 1 normal nft or 1 golden nft, depending on how much he staked
         if (isStakingNormalNFT[msg.sender]){
             factory.mint(msg.sender, normalID, 1, "");
+            hasMinted[msg.sender][normalID] = true;
             emit Redeemed(msg.sender, normalID);
         }
         else{
             factory.mint(msg.sender, goldenID, 1, "");
+            hasMinted[msg.sender][goldenID] = true;
             emit Redeemed(msg.sender, goldenID);
         }
     }
