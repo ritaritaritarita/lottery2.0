@@ -509,7 +509,7 @@ contract LotteryTwo is Ownable{
         //Make sure enough time has passed
         require (block.number > stakingDeadline, "Please wait longer");
         
-        //Make sure enough time has passed
+        //Make sure user deposited before deadline
         require (depositBlock[msg.sender] < stakingDeadline, "You did not stake before the deadline");
         
         //Make sure user did not already mint a nft
